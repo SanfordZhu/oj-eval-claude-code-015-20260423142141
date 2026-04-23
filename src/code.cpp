@@ -114,9 +114,20 @@ int main(){
     // Simple session cache of computed finds to avoid rescans
     unordered_map<string, vector<int>> cache;
     unordered_map<uint64_t, vector<uint64_t>> dirCache; // hash -> offsets
-    unordered_set<uint64_t> dirLoaded; // which hashes have been loaded from dir.db
+    bool dirPreloaded = false;
 
-    // We'll not preload all to save memory; load per key when needed.
+    // Preload dir.db once to avoid repeated scans when many keys are queried
+    {
+        FILE* df = fopen(DIR_FILE, "rb");
+        if(df){
+            uint64_t hh, off;
+            while(fread(&hh,sizeof(hh),1,df)==1 && fread(&off,sizeof(off),1,df)==1){
+                dirCache[hh].push_back(off);
+            }
+            fclose(df);
+            dirPreloaded = true;
+        }
+    }
 
     for(int i=0;i<n;++i){
         cin>>cmd;
@@ -157,8 +168,7 @@ int main(){
                 auto dit = dirCache.find(h);
                 if(dit!=dirCache.end()) offs = dit->second;
 
-                // Scan dir.db for this hash only once per run
-                if(dirLoaded.find(h)==dirLoaded.end()){
+                if(!dirPreloaded){
                     FILE* df = fopen(DIR_FILE, "rb");
                     if(df){
                         uint64_t hh, off;
@@ -168,7 +178,6 @@ int main(){
                         fclose(df);
                     }
                     dirCache[h] = offs;
-                    dirLoaded.insert(h);
                 }
 
                                 // If no offsets found (likely older data before dir.db existed), do a one-time scan
