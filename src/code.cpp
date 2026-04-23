@@ -166,19 +166,55 @@ int main(){
                     }
                 }
 
-                // Read only records at these offsets and verify key matches (hash may collide)
-                FILE* rf = fopen(DATA_FILE, "rb");
-                if(rf){
-                    Rec r;
-                    for(uint64_t off : offs){
-                        if(read_record_at(rf, off, r)){
-                            if(r.key==key){
-                                if(r.op==1) s.insert(r.val);
-                                else if(r.op==2) s.erase(r.val);
+                                // If no offsets found (likely older data before dir.db existed), do a one-time scan
+                if(offs.empty()){
+                    FILE* rf = fopen(DATA_FILE, "rb");
+                    if(rf){
+                        while(true){
+                            uint64_t pos = (uint64_t)ftell(rf);
+                            uint8_t op; uint8_t klen; int32_t val;
+                            size_t rd = fread(&op,1,1,rf);
+                            if(rd!=1) break;
+                            if(fread(&klen,1,1,rf)!=1) break;
+                            string k; k.resize(klen);
+                            if(klen>0){ if(fread(&k[0],1,klen,rf)!=klen) break; }
+                            if(fread(&val,sizeof(val),1,rf)!=1) break;
+                            if(k==key){
+                                offs.push_back(pos);
+                                if(op==1) s.insert(val);
+                                else if(op==2) s.erase(val);
                             }
                         }
+                        fclose(rf);
+                        // Backfill dir.db for this key
+                        if(fp_dir && !offs.empty()){
+                            FILE* df = fopen(DIR_FILE, "ab");
+                            if(df){
+                                uint64_t hh = h;
+                                for(uint64_t off: offs){
+                                    fwrite(&hh, sizeof(hh), 1, df);
+                                    fwrite(&off, sizeof(off), 1, df);
+                                }
+                                fclose(df);
+                            }
+                        }
+                        dirCache[h] = offs;
                     }
-                    fclose(rf);
+                } else {
+                    // Read only records at these offsets and verify key matches (hash may collide)
+                    FILE* rf = fopen(DATA_FILE, "rb");
+                    if(rf){
+                        Rec r;
+                        for(uint64_t off : offs){
+                            if(read_record_at(rf, off, r)){
+                                if(r.key==key){
+                                    if(r.op==1) s.insert(r.val);
+                                    else if(r.op==2) s.erase(r.val);
+                                }
+                            }
+                        }
+                        fclose(rf);
+                    }
                 }
 
                 vector<int> vals; vals.reserve(s.size());
