@@ -22,6 +22,7 @@ using namespace std;
 
 static const char* DATA_FILE = "data.db";
 static const char* DIR_FILE  = "dir.db"; // pairs of {hash:uint64, offset:uint64}
+static const char* DIR2_FILE = "dir2.db"; // records: [klen:uint8][key][op:uint8][val:int32]
 
 struct Rec {
     uint8_t op; // 1 insert, 2 delete
@@ -52,6 +53,16 @@ void append_record(FILE* fp_data, FILE* fp_dir, const string& key, uint8_t op, i
         fwrite(&h, sizeof(h), 1, fp_dir);
         uint64_t off = (uint64_t)pos;
         fwrite(&off, sizeof(off), 1, fp_dir);
+    }
+    // Also append to dir2: exact key record for faster lookup without verifying data.db
+    static FILE* fp_dir2 = nullptr;
+    if(!fp_dir2) fp_dir2 = fopen(DIR2_FILE, "ab");
+    if(fp_dir2){
+        fwrite(&klen, 1, 1, fp_dir2);
+        fwrite(key.data(), 1, klen, fp_dir2);
+        fwrite(&op, 1, 1, fp_dir2);
+        fwrite(&val, sizeof(val), 1, fp_dir2);
+        fflush(fp_dir2);
     }
 }
 
@@ -134,25 +145,36 @@ int main(){
         if(cmd=="insert"){
             cin>>key>>vll; int32_t val = (int32_t)vll;
             append_record(fp_data, fp_dir, key, 1, val);
-            cache.erase(key);
             if(fp_data){ fflush(fp_data); }
             if(fp_dir){ fflush(fp_dir); }
             // Track new offset in dirCache for this key to avoid rereading dir file later
             if(fp_data){
-                long long endpos = ftell(fp_data) - (long long)(1+1+min<size_t>(key.size(),255)+sizeof(int32_t));
+                long long off = ftell(fp_data) - (long long)(1+1+min<size_t>(key.size(),255)+sizeof(int32_t));
                 uint64_t h = fnv1a64(key);
-                dirCache[h].push_back((uint64_t)endpos);
+                dirCache[h].push_back((uint64_t)off);
+            }
+            // If key is cached, update incrementally
+            auto cit = cache.find(key);
+            if(cit!=cache.end()){
+                auto &vec = cit->second;
+                auto itp = lower_bound(vec.begin(), vec.end(), (int)val);
+                if(itp==vec.end() || *itp != (int)val) vec.insert(itp, (int)val);
             }
         } else if(cmd=="delete"){
             cin>>key>>vll; int32_t val = (int32_t)vll;
             append_record(fp_data, fp_dir, key, 2, val);
-            cache.erase(key);
             if(fp_data){ fflush(fp_data); }
             if(fp_dir){ fflush(fp_dir); }
             if(fp_data){
-                long long endpos = ftell(fp_data) - (long long)(1+1+min<size_t>(key.size(),255)+sizeof(int32_t));
+                long long off = ftell(fp_data) - (long long)(1+1+min<size_t>(key.size(),255)+sizeof(int32_t));
                 uint64_t h = fnv1a64(key);
-                dirCache[h].push_back((uint64_t)endpos);
+                dirCache[h].push_back((uint64_t)off);
+            }
+            auto cit = cache.find(key);
+            if(cit!=cache.end()){
+                auto &vec = cit->second;
+                auto itp = lower_bound(vec.begin(), vec.end(), (int)val);
+                if(itp!=vec.end() && *itp==(int)val) vec.erase(itp);
             }
         } else if(cmd=="find"){
             cin>>key;
