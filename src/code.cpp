@@ -103,6 +103,8 @@ public:
     }
 };
 
+static FILE* g_rf = nullptr;
+
 int main(){
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
@@ -238,18 +240,18 @@ int main(){
                     }
                 } else {
                     // Read only records at these offsets and verify key matches (hash may collide)
-                    FILE* rf = fopen(DATA_FILE, "rb");
-                    if(rf){
+                    sort(offs.begin(), offs.end());
+                    if(!g_rf) g_rf = fopen(DATA_FILE, "rb");
+                    if(g_rf){
                         Rec r;
                         for(uint64_t off : offs){
-                            if(read_record_at(rf, off, r)){
+                            if(read_record_at(g_rf, off, r)){
                                 if(r.key==key){
                                     if(r.op==1) s.insert(r.val);
                                     else if(r.op==2) s.erase(r.val);
                                 }
                             }
                         }
-                        fclose(rf);
                     }
                 }
 
@@ -273,5 +275,6 @@ int main(){
 
     if(fp_data) fclose(fp_data);
     if(fp_dir)  fclose(fp_dir);
+    if(g_rf) fclose(g_rf);
     return 0;
 }
