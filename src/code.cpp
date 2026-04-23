@@ -113,9 +113,9 @@ int main(){
 
     // Simple session cache of computed finds to avoid rescans
     unordered_map<string, vector<int>> cache;
-    unordered_map<uint64_t, vector<uint64_t>> dirCache; // hash -> offsets loaded lazily
+    unordered_map<uint64_t, vector<uint64_t>> dirCache; // hash -> offsets
+    unordered_set<uint64_t> dirLoaded; // which hashes have been loaded from dir.db
 
-    // On startup, optionally load dir file into memory per hash buckets (stream, limited)
     // We'll not preload all to save memory; load per key when needed.
 
     for(int i=0;i<n;++i){
@@ -124,9 +124,11 @@ int main(){
             cin>>key>>vll; int32_t val = (int32_t)vll;
             append_record(fp_data, fp_dir, key, 1, val);
             cache.erase(key);
+            if(fp_data){ fflush(fp_data); }
+            if(fp_dir){ fflush(fp_dir); }
             // Track new offset in dirCache for this key to avoid rereading dir file later
             if(fp_data){
-                fflush(fp_data); long long endpos = ftell(fp_data) - (long long)(1+1+min<size_t>(key.size(),255)+sizeof(int32_t));
+                long long endpos = ftell(fp_data) - (long long)(1+1+min<size_t>(key.size(),255)+sizeof(int32_t));
                 uint64_t h = fnv1a64(key);
                 dirCache[h].push_back((uint64_t)endpos);
             }
@@ -134,8 +136,10 @@ int main(){
             cin>>key>>vll; int32_t val = (int32_t)vll;
             append_record(fp_data, fp_dir, key, 2, val);
             cache.erase(key);
+            if(fp_data){ fflush(fp_data); }
+            if(fp_dir){ fflush(fp_dir); }
             if(fp_data){
-                fflush(fp_data); long long endpos = ftell(fp_data) - (long long)(1+1+min<size_t>(key.size(),255)+sizeof(int32_t));
+                long long endpos = ftell(fp_data) - (long long)(1+1+min<size_t>(key.size(),255)+sizeof(int32_t));
                 uint64_t h = fnv1a64(key);
                 dirCache[h].push_back((uint64_t)endpos);
             }
@@ -153,8 +157,8 @@ int main(){
                 auto dit = dirCache.find(h);
                 if(dit!=dirCache.end()) offs = dit->second;
 
-                // Also scan dir.db file to collect offsets (once)
-                if(fp_dir && dit==dirCache.end()){
+                // Scan dir.db for this hash only once per run
+                if(dirLoaded.find(h)==dirLoaded.end()){
                     FILE* df = fopen(DIR_FILE, "rb");
                     if(df){
                         uint64_t hh, off;
@@ -162,8 +166,9 @@ int main(){
                             if(hh==h) offs.push_back(off);
                         }
                         fclose(df);
-                        dirCache[h] = offs;
                     }
+                    dirCache[h] = offs;
+                    dirLoaded.insert(h);
                 }
 
                                 // If no offsets found (likely older data before dir.db existed), do a one-time scan
